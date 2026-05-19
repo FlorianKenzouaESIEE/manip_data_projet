@@ -1,0 +1,4 @@
+# Dépendances ajoutées progressivement — versions épinglées à l'étape 17.
+
+# ── Ingestion ────────────────────────────────────────────────
+gpxpy>=1.6.0
