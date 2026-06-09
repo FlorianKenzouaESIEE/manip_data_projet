@@ -57,10 +57,11 @@ def get_weather(lat: float, lon: float, dt: datetime) -> WeatherSnapshot | None:
     if entry is None:
         return None
 
+    raw_code = entry.get("weather_code")
     return WeatherSnapshot(
         temperature_c=entry.get("temperature_c"),
         wind_speed_kmh=entry.get("wind_speed_kmh"),
         precipitation_mm=entry.get("precipitation_mm"),
         humidity_pct=entry.get("humidity_pct"),
-        weather_code=entry.get("weather_code"),
+        weather_code=int(raw_code) if raw_code is not None else None,
     )
