@@ -6,6 +6,15 @@ unitairement sans base de données.
 
 from __future__ import annotations
 
+from typing import Protocol
+
+
+class HasHeartRate(Protocol):
+    """Protocol satisfait par tout objet exposant un attribut heart_rate."""
+
+    heart_rate: int | None
+
+
 # Fréquence cardiaque maximale de référence quand elle est inconnue
 _DEFAULT_MAX_HR: float = 190.0
 
@@ -67,7 +76,7 @@ def compute_hr_zone(avg_hr: float, max_hr: float = _DEFAULT_MAX_HR) -> int:
     return 5
 
 
-def compute_avg_hr(track_points: list) -> float | None:
+def compute_avg_hr(track_points: list[HasHeartRate]) -> float | None:
     """Calcule la fréquence cardiaque moyenne à partir d'une liste de points de trace.
 
     Args:
@@ -82,7 +91,7 @@ def compute_avg_hr(track_points: list) -> float | None:
     return sum(values) / len(values)
 
 
-def compute_max_hr(track_points: list) -> float | None:
+def compute_max_hr(track_points: list[HasHeartRate]) -> float | None:
     """Calcule la fréquence cardiaque maximale à partir d'une liste de points de trace.
 
     Args:
