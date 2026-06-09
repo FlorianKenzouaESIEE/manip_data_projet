@@ -116,42 +116,70 @@ def run_enrichment() -> None:
     clean_session = get_clean_session()
 
     activities: list[Activity] = raw_session.query(Activity).all()
-    existing_ids: set[int] = {
-        row[0] for row in clean_session.query(ActivityClean.activity_id).all()
+    raw_ids = {act.id for act in activities}
+
+    # Suppression des enrichissements dont l'activité brute a été retirée
+    orphans = [
+        ac for ac in clean_session.query(ActivityClean).all()
+        if ac.activity_id not in raw_ids
+    ]
+    for ac in orphans:
+        print(f"🗑️  Enrichissement retiré : {ac.name}")
+        clean_session.delete(ac)
+    if orphans:
+        clean_session.commit()
+
+    existing: dict[int, ActivityClean] = {
+        ac.activity_id: ac for ac in clean_session.query(ActivityClean).all()
     }
 
     new_count = 0
+    weather_count = 0
     skip_count = 0
 
     for act in activities:
-        if act.id in existing_ids:
+        if act.id not in existing:
+            # Nouvelle activité : enrichissement complet
+            track_points: list[TrackPoint] = (
+                raw_session.query(TrackPoint)
+                .filter(TrackPoint.activity_id == act.id)
+                .all()
+            )
+            clean_row = _build_activity_clean(act, track_points)
+            clean_session.add(clean_row)
+            new_count += 1
+            weather_flag = "☁" if clean_row.temperature_c is not None else "—"
+            print(
+                f"  ✓ {act.name} | {act.sport_type} | "
+                f"{clean_row.speed_kmh:.1f} km/h | "
+                f"allure {clean_row.pace_min_per_km:.2f} min/km | "
+                f"météo {weather_flag}"
+                if clean_row.speed_kmh and clean_row.pace_min_per_km
+                else f"  ✓ {act.name} | {act.sport_type}"
+            )
+        elif existing[act.id].temperature_c is None:
+            # Météo manquante : tentative de mise à jour depuis le cache
+            if act.start_lat and act.start_lon and act.start_time:
+                weather = get_weather(act.start_lat, act.start_lon, act.start_time)
+                if weather and weather.temperature_c is not None:
+                    ac = existing[act.id]
+                    ac.temperature_c = weather.temperature_c
+                    ac.wind_speed_kmh = weather.wind_speed_kmh
+                    ac.precipitation_mm = weather.precipitation_mm
+                    ac.humidity_pct = weather.humidity_pct
+                    ac.weather_code = weather.weather_code
+                    print(f"  ☁  Météo mise à jour : {act.name}")
+                    weather_count += 1
+                    continue
             skip_count += 1
-            continue
-
-        track_points: list[TrackPoint] = (
-            raw_session.query(TrackPoint)
-            .filter(TrackPoint.activity_id == act.id)
-            .all()
-        )
-        clean_row = _build_activity_clean(act, track_points)
-        clean_session.add(clean_row)
-        new_count += 1
-
-        weather_flag = "☁" if clean_row.temperature_c is not None else "—"
-        print(
-            f"  ✓ {act.name} | {act.sport_type} | "
-            f"{clean_row.speed_kmh:.1f} km/h | "
-            f"allure {clean_row.pace_min_per_km:.2f} min/km | "
-            f"météo {weather_flag}"
-            if clean_row.speed_kmh and clean_row.pace_min_per_km
-            else f"  ✓ {act.name} | {act.sport_type}"
-        )
+        else:
+            skip_count += 1
 
     clean_session.commit()
     raw_session.close()
     clean_session.close()
 
-    print(f"\n  → {new_count} activité(s) enrichie(s), {skip_count} déjà présente(s).")
+    print(f"\n  → {new_count} ajouté(s), {weather_count} météo mis à jour, {skip_count} déjà complet(s).")
 
 
 def run_aggregations() -> None:

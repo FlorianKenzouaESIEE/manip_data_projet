@@ -1,64 +1,83 @@
-"""Composant carte géographique des tracés GPS."""
+"""Composant carte géographique — tracé GPS d'une activité (CartoDB Positron)."""
 
 from __future__ import annotations
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 
 
-def make_map_figure(tracks: pd.DataFrame, activities: pd.DataFrame) -> go.Figure:
-    """Construit la carte des tracés GPS de toutes les activités.
+def make_activity_map(track: pd.DataFrame) -> go.Figure:
+    """Construit la carte d'une activité avec tuiles CartoDB Positron.
 
     Args:
-        tracks: Points GPS sous-échantillonnés (depuis dashsport_raw.db).
-        activities: Activités enrichies (depuis dashsport_clean.db).
-
-    Returns:
-        Figure Plotly prête à afficher dans un dcc.Graph.
+        track: Points GPS complets de l'activité (depuis load_activity_track).
     """
-    if tracks.empty:
+    if track.empty or "lat" not in track.columns or "lon" not in track.columns:
         fig = go.Figure()
         fig.update_layout(
-            title="Aucun tracé disponible — lancez get_data.py puis clean_data.py",
-            paper_bgcolor="#f5f5f5",
-            font={"color": "#555"},
+            paper_bgcolor="#141420",
+            plot_bgcolor="#141420",
+            margin=dict(l=0, r=0, t=0, b=0),
+            height=350,
+        )
+        fig.add_annotation(
+            text="Aucun tracé GPS disponible",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(color="rgba(238,238,245,0.4)", size=13, family="Barlow Condensed"),
         )
         return fig
 
-    merged = tracks.copy()
-    if not activities.empty:
-        meta = activities[["activity_id", "name", "sport_type"]].copy()
-        merged = tracks.merge(meta, on="activity_id", how="left")
-    else:
-        merged["sport_type"] = "unknown"
-        merged["name"] = "Activité " + merged["activity_id"].astype(str)
+    center_lat = float(track["lat"].mean())
+    center_lon = float(track["lon"].mean())
 
-    merged["sport_type"] = merged["sport_type"].fillna("unknown")
-    merged["name"] = merged["name"].fillna("Sans nom")
+    fig = go.Figure()
 
-    center = {
-        "lat": float(merged["lat"].mean()),
-        "lon": float(merged["lon"].mean()),
-    }
-
-    fig = px.scatter_mapbox(
-        merged,
-        lat="lat",
-        lon="lon",
-        color="sport_type",
-        hover_name="name",
-        hover_data={"lat": False, "lon": False, "sport_type": False},
-        center=center,
-        zoom=11,
-        mapbox_style="open-street-map",
-        title="Tracés GPS de toutes les activités",
-        color_discrete_sequence=px.colors.qualitative.Set2,
+    # Tracé GPS — Deep Purple
+    fig.add_trace(
+        go.Scattermapbox(
+            lat=track["lat"].tolist(),
+            lon=track["lon"].tolist(),
+            mode="lines",
+            line=dict(width=5, color="#7B2FBE"),
+            hoverinfo="none",
+            name="Tracé",
+        )
     )
-    fig.update_traces(marker={"size": 3, "opacity": 0.7})
+
+    # Marqueur départ — Electric Cyan
+    fig.add_trace(
+        go.Scattermapbox(
+            lat=[float(track["lat"].iloc[0])],
+            lon=[float(track["lon"].iloc[0])],
+            mode="markers",
+            marker=dict(size=12, color="#00B4D8"),
+            hovertemplate="Départ<extra></extra>",
+            name="Départ",
+        )
+    )
+
+    # Marqueur arrivée — Hot Pink
+    fig.add_trace(
+        go.Scattermapbox(
+            lat=[float(track["lat"].iloc[-1])],
+            lon=[float(track["lon"].iloc[-1])],
+            mode="markers",
+            marker=dict(size=12, color="#F72585"),
+            hovertemplate="Arrivée<extra></extra>",
+            name="Arrivée",
+        )
+    )
+
     fig.update_layout(
-        margin={"l": 0, "r": 0, "t": 40, "b": 0},
-        legend_title="Sport",
-        legend={"bgcolor": "rgba(255,255,255,0.85)", "bordercolor": "#ccc", "borderwidth": 1},
+        mapbox=dict(
+            style="carto-positron",
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=13,
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=350,
+        paper_bgcolor="#141420",
+        showlegend=False,
     )
     return fig

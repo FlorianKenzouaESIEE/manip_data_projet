@@ -85,6 +85,25 @@ def parse_activity_file(file_path: Path) -> Union[ParsedGPXActivity, ParsedFITAc
         return None
 
 
+def delete_removed_activities(activity_files: list[Path], session: Session) -> None:
+    """Supprime les activités dont le fichier source n'existe plus dans activities/.
+
+    Args:
+        activity_files: Fichiers actuellement présents dans le dossier activities/.
+        session: Session SQLAlchemy active sur dashsport_raw.db.
+    """
+    current_names = {f.name for f in activity_files}
+    to_delete = [
+        act for act in session.query(Activity).all()
+        if Path(act.source_file).name not in current_names
+    ]
+    for act in to_delete:
+        print(f"🗑️  Fichier absent, activité retirée : {Path(act.source_file).name}")
+        session.delete(act)  # cascade supprime aussi les TrackPoints associés
+    if to_delete:
+        session.commit()
+
+
 def insert_activity_to_db(
     parsed_activity: Union[ParsedGPXActivity, ParsedFITActivity],
     session: Session,
@@ -154,16 +173,17 @@ def main() -> None:
     # Étape 2 : Scan des fichiers d'activités
     print(f"\n[2/3] Scan du dossier '{ACTIVITIES_DIR}'...")
     activity_files = scan_activity_files(ACTIVITIES_DIR)
-
-    if not activity_files:
-        print("⚠️  Aucun fichier d'activité trouvé.")
-        sys.exit(0)
-
     print(f"✓ {len(activity_files)} fichier(s) trouvé(s)")
 
-    # Étape 3 : Parsing et insertion en base
-    print("\n[3/3] Parsing et insertion en base de données...")
+    # Étape 3 : Synchronisation avec la base de données
+    print("\n[3/3] Synchronisation en base de données...")
     session = get_session(DB_PATH)
+
+    delete_removed_activities(activity_files, session)
+
+    if not activity_files:
+        session.close()
+        return
 
     success_count = 0
     error_count = 0

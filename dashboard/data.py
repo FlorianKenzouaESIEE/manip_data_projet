@@ -30,6 +30,19 @@ def load_track_points() -> pd.DataFrame:
     return df.iloc[::_TRACK_SAMPLE_STEP].reset_index(drop=True)
 
 
+def load_hr_series_all() -> list[float]:
+    """Charge toutes les valeurs FC disponibles (toutes activités confondues)."""
+    if not _RAW_DB.exists():
+        return []
+    engine = create_engine(f"sqlite:///{_RAW_DB}", echo=False)
+    with engine.connect() as conn:
+        df = pd.read_sql(
+            text("SELECT heart_rate FROM track_points WHERE heart_rate IS NOT NULL"),
+            conn,
+        )
+    return df["heart_rate"].tolist()
+
+
 def load_activity_track(activity_id: int) -> pd.DataFrame:
     """Charge tous les points GPS d'une activité (sans sous-échantillonnage).
 

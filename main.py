@@ -17,14 +17,20 @@ _ACTIVITIES_DIR = Path("activities")
 
 
 def _bootstrap() -> None:
-    """Construit les bases de données si elles sont absentes."""
-    if not _RAW_DB.exists() and _ACTIVITIES_DIR.exists():
-        print("[bootstrap] Ingestion des activités...")
+    """Ingestion, cache météo et enrichissement incrémentaux des nouvelles activités."""
+    if _ACTIVITIES_DIR.exists():
         import get_data
         get_data.main()
 
-    if not _CLEAN_DB.exists() and _RAW_DB.exists():
-        print("[bootstrap] Nettoyage et enrichissement...")
+    if _RAW_DB.exists():
+        import sys as _sys
+        _sys.path.insert(0, str(Path("scripts")))
+        try:
+            import fetch_weather_cache as _fwc
+            _fwc.main()
+        except Exception as exc:
+            print(f"[bootstrap] Cache météo non mis à jour : {exc}")
+
         import clean_data
         clean_data.main()
 
