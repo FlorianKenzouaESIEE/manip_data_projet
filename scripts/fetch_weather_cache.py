@@ -110,7 +110,7 @@ def main() -> None:
     if not _RAW_DB.exists():
         print("Erreur : data/dashsport_raw.db introuvable.")
         print("Lancez d'abord : python get_data.py")
-        sys.exit(1)
+        return
 
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -135,8 +135,7 @@ def main() -> None:
 
     if not activities:
         print("Aucune activité avec coordonnées GPS dans la base brute.")
-        print("Lancez d'abord : python get_data.py")
-        sys.exit(0)
+        return
 
     seen: set[tuple[float, float, str]] = set()
     new_entries = 0
@@ -157,7 +156,7 @@ def main() -> None:
         seen.add(key_tuple)
 
         # Vérifie si la journée est déjà en cache
-        sample_key = f"{lat}_{lon}_{date_str}T00"
+        sample_key = f"{lat}_{lon}_{date_str}T00:00"
         if sample_key in cache:
             print(f"  Déjà en cache : {act.name} ({date_str})")
             continue

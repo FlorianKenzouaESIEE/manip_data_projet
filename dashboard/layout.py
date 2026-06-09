@@ -1,179 +1,384 @@
-"""Layout principal du dashboard DashSport."""
+"""Layout principal du dashboard DashSport — design system sombre."""
 
 from __future__ import annotations
 
 import pandas as pd
 from dash import dcc, html
 
-from .components.charts import (
-    SCATTER_OPTIONS,
-    make_activity_type_bar,
-    make_detail_figure,
-    make_distance_histogram,
-    make_duration_histogram,
-    make_scatter_figure,
-)
+from .components.charts import make_global_hr_histogram, make_sport_duration_pie, make_sport_stats_table
 from .components.header import header_component
-from .components.map import make_map_figure
-from .data import load_activities, load_track_points
+from .data import load_activities, load_hr_series_all
 
-_SECTION_STYLE = {"padding": "1.5rem 2rem"}
-_TITLE_STYLE: dict = {
-    "margin": "0 0 0.75rem",
-    "fontSize": "1.1rem",
-    "color": "#333",
-    "fontWeight": "600",
+# ── Design tokens ─────────────────────────────────────────────────────────────
+_BG_MAIN = "#0D0D14"
+_BG_CARD = "#141420"
+_PINK = "#F72585"
+_VIOLET = "#E040FB"
+_PURPLE = "#7B2FBE"
+_CYAN = "#00B4D8"
+_TEXT = "#EEEEF5"
+
+_CARD_STYLE: dict = {
+    "background": _BG_CARD,
+    "borderRadius": "12px",
+    "border": f"1px solid rgba(123,47,190,0.3)",
+    "padding": "1.25rem",
+    "marginBottom": "1rem",
 }
-_HR_STYLE: dict = {"border": "none", "borderTop": "1px solid #ddd", "margin": "0"}
+_SECTION_TITLE: dict = {
+    "fontFamily": "'Barlow Condensed', sans-serif",
+    "fontWeight": "700",
+    "fontSize": "0.85rem",
+    "color": _TEXT,
+    "letterSpacing": "0.12em",
+    "textTransform": "uppercase",
+    "opacity": "0.55",
+    "marginBottom": "0.75rem",
+}
+_DROPDOWN_STYLE: dict = {
+    "background": _BG_CARD,
+    "borderRadius": "8px",
+    "border": f"1px solid {_PURPLE}",
+    "color": _TEXT,
+}
+
+# ── Couleurs et icônes par sport ──────────────────────────────────────────────
+_SPORT_COLORS: dict[str, str] = {
+    "running": _PINK,
+    "cycling": _CYAN,
+    "hiking": "#39D353",
+    "walking": _VIOLET,
+    "swimming": _PURPLE,
+    "skiing": _TEXT,
+    "trail running": _PINK,
+}
+_SPORT_ICONS: dict[str, str] = {
+    "running": "🏃",
+    "cycling": "🚴",
+    "hiking": "🥾",
+    "walking": "🚶",
+    "swimming": "🏊",
+    "skiing": "⛷",
+    "trail running": "🏔",
+}
+
+
+def _fmt_pace(pace: float) -> str:
+    mins = int(pace)
+    secs = int((pace % 1) * 60)
+    return f"{mins}'{secs:02d}\"/km"
+
+
+def _fmt_duration_short(dur_s: float) -> str:
+    h = int(dur_s // 3600)
+    m = int((dur_s % 3600) // 60)
+    return f"{h}h{m:02d}" if h > 0 else f"{m}min"
+
+
+def _activity_card(row: pd.Series) -> html.Div:
+    """Construit une card cliquable pour une activité."""
+    sport = str(row.get("sport_type", "unknown")).lower()
+    border_color = _SPORT_COLORS.get(sport, _PURPLE)
+    icon = _SPORT_ICONS.get(sport, "🏅")
+    activity_id = int(row["activity_id"])
+
+    km = row.get("total_distance_m", 0) / 1000
+    dur_str = _fmt_duration_short(float(row.get("duration_s", 0)))
+
+    pace = row.get("pace_min_per_km")
+    pace_str = _fmt_pace(float(pace)) if (pace is not None and not pd.isna(pace)) else "—"
+
+    hr = row.get("avg_heart_rate")
+    hr_ok = hr is not None and not pd.isna(hr)
+
+    try:
+        date = pd.to_datetime(row["start_time"]).strftime("%d/%m/%Y")
+    except Exception:
+        date = str(row.get("start_time", ""))
+
+    metrics: list = [
+        html.Span(f"{km:.1f} km", style={"color": _TEXT, "fontFamily": "'Barlow Condensed', sans-serif", "fontWeight": "600"}),
+        html.Span(" · ", style={"color": _PURPLE, "opacity": "0.6"}),
+        html.Span(dur_str, style={"color": _TEXT, "fontFamily": "'Barlow Condensed', sans-serif", "fontWeight": "600"}),
+        html.Span(" · ", style={"color": _PURPLE, "opacity": "0.6"}),
+        html.Span(pace_str, style={"color": _CYAN, "fontFamily": "'Barlow Condensed', sans-serif", "fontWeight": "600"}),
+    ]
+    if hr_ok:
+        metrics += [
+            html.Span(" · ", style={"color": _PURPLE, "opacity": "0.6"}),
+            html.Span(f"♥ {int(hr)} bpm", style={"color": _PINK, "fontFamily": "'Barlow Condensed', sans-serif", "fontWeight": "600"}),
+        ]
+
+    return html.Div(
+        id={"type": "activity-card", "index": activity_id},
+        n_clicks=0,
+        children=[
+            html.Div(
+                [
+                    html.Span(icon, style={"fontSize": "1.5rem", "lineHeight": "1"}),
+                    html.Div(
+                        [
+                            html.Div(
+                                str(row.get("name", f"Activité {activity_id}")),
+                                style={
+                                    "fontFamily": "'Barlow Condensed', sans-serif",
+                                    "fontWeight": "700",
+                                    "fontSize": "1rem",
+                                    "color": _TEXT,
+                                    "whiteSpace": "nowrap",
+                                    "overflow": "hidden",
+                                    "textOverflow": "ellipsis",
+                                },
+                            ),
+                            html.Div(
+                                f"{sport.capitalize()} · {date}",
+                                style={
+                                    "fontSize": "0.72rem",
+                                    "color": _TEXT,
+                                    "opacity": "0.45",
+                                    "fontFamily": "'Barlow', sans-serif",
+                                    "marginTop": "1px",
+                                },
+                            ),
+                        ],
+                        style={"flex": "1", "minWidth": "0"},
+                    ),
+                    html.Div(
+                        "›",
+                        style={
+                            "color": _PURPLE,
+                            "fontSize": "1.3rem",
+                            "opacity": "0.6",
+                            "fontFamily": "'Barlow Condensed', sans-serif",
+                        },
+                    ),
+                ],
+                style={"display": "flex", "alignItems": "center", "gap": "0.75rem", "marginBottom": "0.5rem"},
+            ),
+            html.Div(metrics, style={"display": "flex", "alignItems": "center", "fontSize": "0.83rem", "flexWrap": "wrap"}),
+        ],
+        style={
+            "background": _BG_CARD,
+            "borderLeft": f"3px solid {border_color}",
+            "borderRadius": "12px",
+            "padding": "0.875rem 1rem",
+            "marginBottom": "0.625rem",
+            "cursor": "pointer",
+        },
+    )
 
 
 def create_layout() -> html.Div:
     """Construit et retourne le layout complet de l'application."""
     activities = load_activities()
-    tracks = load_track_points()
+    hr_series = load_hr_series_all()
+    # Cartes d'activités
+    if activities.empty:
+        cards: list = [
+            html.P(
+                "Aucune activité — lancez get_data.py puis clean_data.py",
+                style={"color": "rgba(238,238,245,0.4)", "fontFamily": "'Barlow', sans-serif", "padding": "2rem 0", "textAlign": "center"},
+            )
+        ]
+    else:
+        sorted_acts = (
+            activities.sort_values("start_time", ascending=False)
+            if "start_time" in activities.columns
+            else activities
+        )
+        cards = [_activity_card(row) for _, row in sorted_acts.iterrows()]
 
+    # ── Layout ────────────────────────────────────────────────────────────────
     return html.Div(
         [
-            header_component(activities),
-            html.Main(
-                [
-                    # ── Section 1 : Carte GPS ─────────────────────────────────
-                    html.Section(
+            dcc.Store(id="app-state", data={"view": "dashboard", "activity_id": None}),
+
+            # ══════════════════════════════════════════════════════════════════
+            # VUE 1 — Dashboard principal
+            # ══════════════════════════════════════════════════════════════════
+            html.Div(
+                id="view-dashboard",
+                children=[
+                    header_component(activities),
+
+                    html.Div(
                         [
-                            html.H2("Carte des tracés GPS", style=_TITLE_STYLE),
-                            dcc.Graph(
-                                id="map-activities",
-                                figure=make_map_figure(tracks, activities),
-                                style={"height": "600px"},
-                                config={"scrollZoom": True},
-                            ),
-                        ],
-                        style=_SECTION_STYLE,
-                    ),
-                    html.Hr(style=_HR_STYLE),
-                    # ── Section 2 : Histogrammes ──────────────────────────────
-                    html.Section(
-                        [
-                            html.H2("Distribution des activités", style=_TITLE_STYLE),
-                            html.Div(
-                                [
-                                    dcc.Graph(
-                                        id="bar-sport-type",
-                                        figure=make_activity_type_bar(activities),
-                                        style={"flex": "1", "minWidth": "280px"},
-                                        config={"displayModeBar": False},
-                                    ),
-                                    dcc.Graph(
-                                        id="hist-distance",
-                                        figure=make_distance_histogram(activities),
-                                        style={"flex": "1", "minWidth": "280px"},
-                                        config={"displayModeBar": False},
-                                    ),
-                                    dcc.Graph(
-                                        id="hist-duration",
-                                        figure=make_duration_histogram(activities),
-                                        style={"flex": "1", "minWidth": "280px"},
-                                        config={"displayModeBar": False},
-                                    ),
-                                ],
-                                style={
-                                    "display": "flex",
-                                    "gap": "1rem",
-                                    "flexWrap": "wrap",
-                                },
-                            ),
-                        ],
-                        style=_SECTION_STYLE,
-                    ),
-                    html.Hr(style=_HR_STYLE),
-                    # ── Section 3 : Scatter croisé ────────────────────────────
-                    html.Section(
-                        [
-                            html.H2("Analyse croisée", style=_TITLE_STYLE),
+                            # Stats par sport — tableau + donut sur la même ligne
                             html.Div(
                                 [
                                     html.Div(
                                         [
-                                            html.Label(
-                                                "Axe X",
-                                                style={
-                                                    "fontWeight": "600",
-                                                    "fontSize": "0.85rem",
-                                                    "display": "block",
-                                                    "marginBottom": "0.25rem",
-                                                },
-                                            ),
-                                            dcc.Dropdown(
-                                                id="scatter-x",
-                                                options=SCATTER_OPTIONS,
-                                                value="temperature_c",
-                                                clearable=False,
+                                            html.Div("Stats par sport", style=_SECTION_TITLE),
+                                            dcc.Graph(
+                                                figure=make_sport_stats_table(activities),
+                                                config={"displayModeBar": False},
                                             ),
                                         ],
-                                        style={"flex": "1", "minWidth": "200px"},
+                                        style={**_CARD_STYLE, "flex": "1.3", "minWidth": "280px", "marginBottom": "0"},
                                     ),
                                     html.Div(
                                         [
-                                            html.Label(
-                                                "Axe Y",
-                                                style={
-                                                    "fontWeight": "600",
-                                                    "fontSize": "0.85rem",
-                                                    "display": "block",
-                                                    "marginBottom": "0.25rem",
-                                                },
-                                            ),
-                                            dcc.Dropdown(
-                                                id="scatter-y",
-                                                options=SCATTER_OPTIONS,
-                                                value="pace_min_per_km",
-                                                clearable=False,
+                                            html.Div("Durée par sport", style=_SECTION_TITLE),
+                                            dcc.Graph(
+                                                figure=make_sport_duration_pie(activities),
+                                                config={"displayModeBar": False},
                                             ),
                                         ],
-                                        style={"flex": "1", "minWidth": "200px"},
+                                        style={**_CARD_STYLE, "flex": "1", "minWidth": "240px", "marginBottom": "0"},
                                     ),
                                 ],
-                                style={
-                                    "display": "flex",
-                                    "gap": "1.5rem",
-                                    "marginBottom": "1rem",
-                                    "flexWrap": "wrap",
-                                },
+                                style={"display": "flex", "gap": "1rem", "flexWrap": "wrap", "marginBottom": "1rem"},
                             ),
-                            dcc.Graph(
-                                id="scatter-cross",
-                                figure=make_scatter_figure(activities),
-                                style={"height": "450px"},
+
+                            # Histogramme FC global
+                            html.Div(
+                                [
+                                    html.Div("Distribution FC globale", style=_SECTION_TITLE),
+                                    # Légende des zones inline
+                                    html.Div(
+                                        [
+                                            html.Span("■ Z1 Récup", style={"color": "#00B4D8", "marginRight": "1rem", "fontSize": "0.7rem"}),
+                                            html.Span("■ Z2 Endurance", style={"color": "#39D353", "marginRight": "1rem", "fontSize": "0.7rem"}),
+                                            html.Span("■ Z3 Tempo", style={"color": "#EF9F27", "marginRight": "1rem", "fontSize": "0.7rem"}),
+                                            html.Span("■ Z4 Seuil", style={"color": "#E040FB", "marginRight": "1rem", "fontSize": "0.7rem"}),
+                                            html.Span("■ Z5 VO₂max", style={"color": "#F72585", "fontSize": "0.7rem"}),
+                                        ],
+                                        style={"display": "flex", "flexWrap": "wrap", "marginBottom": "0.5rem", "fontFamily": "'Barlow', sans-serif"},
+                                    ),
+                                    dcc.Graph(
+                                        id="hr-histogram",
+                                        figure=make_global_hr_histogram(hr_series),
+                                        config={"displayModeBar": False},
+                                    ),
+                                ],
+                                style=_CARD_STYLE,
                             ),
-                            html.P(
-                                "Cliquez sur un point pour afficher le détail seconde "
-                                "par seconde de l'activité.",
-                                style={
-                                    "fontSize": "0.85rem",
-                                    "color": "#888",
-                                    "margin": "0.5rem 0 0",
-                                },
+
+                            # Liste des activités
+                            html.Div(
+                                [
+                                    html.Div("Activités récentes", style=_SECTION_TITLE),
+                                    html.Div(cards),
+                                ],
+                                style=_CARD_STYLE,
                             ),
                         ],
-                        style=_SECTION_STYLE,
+                        style={"maxWidth": "860px", "margin": "0 auto", "padding": "1.25rem 1rem 5rem"},
                     ),
-                    html.Hr(style=_HR_STYLE),
-                    # ── Section 4 : Détail activité (masquée par défaut) ──────
-                    html.Section(
-                        id="detail-section",
-                        children=[
-                            html.H2("Détail de l'activité", style=_TITLE_STYLE),
-                            dcc.Graph(
-                                id="detail-graph",
-                                figure=make_detail_figure(pd.DataFrame()),
-                                config={"displayModeBar": False},
-                            ),
-                        ],
-                        style={"display": "none"},
+
+                    # FAB centré fixe
+                    html.Div(
+                        html.Div(
+                            "+",
+                            style={
+                                "background": f"linear-gradient(135deg, {_PINK}, {_VIOLET})",
+                                "borderRadius": "28px",
+                                "padding": "0.7rem 2.25rem",
+                                "fontSize": "1.6rem",
+                                "color": "white",
+                                "fontWeight": "900",
+                                "fontFamily": "'Barlow Condensed', sans-serif",
+                                "cursor": "pointer",
+                                "boxShadow": f"0 4px 24px rgba(247,37,133,0.4)",
+                                "lineHeight": "1",
+                            },
+                        ),
+                        style={
+                            "position": "fixed",
+                            "bottom": "1.5rem",
+                            "left": "50%",
+                            "transform": "translateX(-50%)",
+                            "zIndex": "200",
+                        },
                     ),
                 ],
-                style={"background": "#f5f5f5", "minHeight": "calc(100vh - 80px)"},
+            ),
+
+            # ══════════════════════════════════════════════════════════════════
+            # VUE 2 — Détail d'une séance
+            # ══════════════════════════════════════════════════════════════════
+            html.Div(
+                id="view-detail",
+                style={"display": "none"},
+                children=[
+                    # Barre de navigation top
+                    html.Div(
+                        [
+                            html.Button("← Retour", id="btn-retour", n_clicks=0),
+                        ],
+                        style={
+                            "padding": "0.875rem 1.5rem",
+                            "background": _BG_MAIN,
+                            "borderBottom": f"1px solid rgba(123,47,190,0.25)",
+                            "position": "sticky",
+                            "top": "0",
+                            "zIndex": "90",
+                        },
+                    ),
+
+                    html.Div(
+                        [
+                            # Header activité (peuplé par callback)
+                            html.Div(id="detail-header"),
+
+                            # Hero métriques (peuplé par callback)
+                            html.Div(id="detail-hero-metrics"),
+
+                            # Carte GPS
+                            html.Div(
+                                [
+                                    html.Div("Tracé GPS", style=_SECTION_TITLE),
+                                    dcc.Graph(
+                                        id="detail-map",
+                                        config={"scrollZoom": True, "displayModeBar": False},
+                                        style={"borderRadius": "8px", "overflow": "hidden"},
+                                    ),
+                                ],
+                                style={
+                                    **_CARD_STYLE,
+                                    "border": f"1px solid {_PURPLE}",
+                                },
+                            ),
+
+                            # Courbes de performance
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.Div("Courbes de performance", style={**_SECTION_TITLE, "marginBottom": "0"}),
+                                            dcc.RadioItems(
+                                                id="curves-x-mode",
+                                                options=[
+                                                    {"label": " Temps", "value": "time"},
+                                                    {"label": " Distance", "value": "distance"},
+                                                ],
+                                                value="time",
+                                                inline=True,
+                                                style={"gap": "1rem"},
+                                                inputStyle={"marginRight": "4px", "accentColor": _PINK},
+                                                labelStyle={
+                                                    "color": _TEXT,
+                                                    "fontSize": "0.8rem",
+                                                    "fontFamily": "'Barlow', sans-serif",
+                                                    "cursor": "pointer",
+                                                },
+                                            ),
+                                        ],
+                                        style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "0.75rem"},
+                                    ),
+                                    dcc.Graph(id="detail-curves", config={"displayModeBar": False}),
+                                ],
+                                style=_CARD_STYLE,
+                            ),
+
+                            # Conditions météo (peuplé par callback)
+                            html.Div(id="detail-weather"),
+
+                        ],
+                        style={"maxWidth": "860px", "margin": "0 auto", "padding": "1rem 1rem 2rem"},
+                    ),
+                ],
             ),
         ],
-        style={"fontFamily": "Arial, sans-serif", "margin": "0"},
+        style={"background": _BG_MAIN, "minHeight": "100vh", "color": _TEXT},
     )

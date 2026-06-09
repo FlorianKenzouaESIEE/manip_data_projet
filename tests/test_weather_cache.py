@@ -16,7 +16,7 @@ from src.weather.cache import WeatherSnapshot, _cache_key, get_weather
 
 def test_cache_key_format() -> None:
     key = _cache_key(48.8566, 2.3522, datetime(2024, 6, 1, 7, 30, 0))
-    assert key == "48.86_2.35_2024-06-01T07"
+    assert key == "48.86_2.35_2024-06-01T07:00"
 
 
 def test_cache_key_truncates_minutes_seconds() -> None:
@@ -34,7 +34,7 @@ def test_cache_key_rounds_coordinates() -> None:
 # ─── get_weather ──────────────────────────────────────────────────────────────
 
 _SAMPLE_CACHE = {
-    "48.86_2.35_2024-06-01T07": {
+    "48.86_2.35_2024-06-01T07:00": {
         "temperature_c": 18.5,
         "wind_speed_kmh": 12.0,
         "precipitation_mm": 0.0,

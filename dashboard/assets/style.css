@@ -1,0 +1,85 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #0D0D14;
+  color: #EEEEF5;
+  font-family: 'Barlow', sans-serif;
+  font-weight: 400;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #141420; }
+::-webkit-scrollbar-thumb { background: #7B2FBE; border-radius: 3px; }
+
+/* Dash Dropdown dark theme */
+.Select-control {
+  background-color: #141420 !important;
+  border-color: #7B2FBE !important;
+  color: #EEEEF5 !important;
+  border-radius: 8px !important;
+}
+.Select-menu-outer {
+  background-color: #141420 !important;
+  border-color: #7B2FBE !important;
+  z-index: 9999 !important;
+}
+.Select-option {
+  background-color: #141420 !important;
+  color: #EEEEF5 !important;
+}
+.Select-option.is-focused,
+.Select-option.is-selected {
+  background-color: #7B2FBE !important;
+  color: #EEEEF5 !important;
+}
+.Select-value-label {
+  color: #EEEEF5 !important;
+}
+.Select-placeholder {
+  color: rgba(238,238,245,0.4) !important;
+}
+.Select-arrow { border-top-color: #7B2FBE !important; }
+.VirtualizedSelectOption { background-color: #141420 !important; color: #EEEEF5 !important; }
+.VirtualizedSelectFocusedOption { background-color: #7B2FBE !important; }
+.dash-dropdown .Select--single > .Select-control .Select-value { color: #EEEEF5 !important; }
+
+/* Activity card hover effect */
+.activity-card:hover {
+  transform: translateX(4px);
+  border-left-width: 4px !important;
+}
+
+/* Radio items */
+.dash-radioitems label {
+  color: #EEEEF5 !important;
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* Remove default Dash graph margins */
+.js-plotly-plot .plotly {
+  background: transparent !important;
+}
+
+/* Retour button */
+#btn-retour {
+  background: transparent;
+  border: 1px solid rgba(123,47,190,0.5);
+  color: #EEEEF5;
+  font-family: 'Barlow', sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+#btn-retour:hover {
+  background: rgba(123,47,190,0.2);
+  border-color: #7B2FBE;
+}

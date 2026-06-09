@@ -29,7 +29,7 @@ class WeatherSnapshot:
 
 def _cache_key(lat: float, lon: float, dt: datetime) -> str:
     """Retourne la clé du cache au format {lat_r2}_{lon_r2}_{YYYY-MM-DDTHH}."""
-    return f"{round(lat, 2)}_{round(lon, 2)}_{dt.strftime('%Y-%m-%dT%H')}"
+    return f"{round(lat, 2)}_{round(lon, 2)}_{dt.strftime('%Y-%m-%dT%H:00')}"
 
 
 def get_weather(lat: float, lon: float, dt: datetime) -> WeatherSnapshot | None:
