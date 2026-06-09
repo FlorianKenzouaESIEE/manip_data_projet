@@ -1,4 +1,4 @@
-"""Composants graphiques : histogrammes, analyses croisées, détail d'activité."""
+"""Composants graphiques : histogrammes et analyses croisées."""
 
 from __future__ import annotations
 
@@ -122,4 +122,75 @@ def make_duration_histogram(activities: pd.DataFrame) -> go.Figure:
         yaxis={"showgrid": True, "gridcolor": "#eee"},
     )
     fig.update_traces(opacity=0.75)
+    return fig
+
+
+# ─── Étape 14 : scatter croisés ──────────────────────────────────────────────
+
+SCATTER_OPTIONS: list[dict[str, str]] = [
+    {"label": "Allure (min/km)", "value": "pace_min_per_km"},
+    {"label": "Vitesse (km/h)", "value": "speed_kmh"},
+    {"label": "Distance (km)", "value": "distance_km"},
+    {"label": "Durée (min)", "value": "duration_min"},
+    {"label": "FC moyenne (bpm)", "value": "avg_heart_rate"},
+    {"label": "FC max (bpm)", "value": "max_heart_rate"},
+    {"label": "Température (°C)", "value": "temperature_c"},
+    {"label": "Vent (km/h)", "value": "wind_speed_kmh"},
+    {"label": "Humidité (%)", "value": "humidity_pct"},
+]
+
+_LABEL_MAP: dict[str, str] = {o["value"]: o["label"] for o in SCATTER_OPTIONS}
+
+
+def make_scatter_figure(
+    activities: pd.DataFrame,
+    x_col: str = "temperature_c",
+    y_col: str = "pace_min_per_km",
+) -> go.Figure:
+    """Scatter plot croisé de deux métriques, coloré par sport.
+
+    Args:
+        activities: DataFrame des activités enrichies.
+        x_col: Colonne pour l'axe X (valeur de SCATTER_OPTIONS).
+        y_col: Colonne pour l'axe Y (valeur de SCATTER_OPTIONS).
+    """
+    if activities.empty:
+        return _empty_fig("Aucune activité disponible")
+
+    df = activities.copy()
+    if "total_distance_m" in df.columns:
+        df["distance_km"] = df["total_distance_m"] / 1000
+    if "duration_s" in df.columns:
+        df["duration_min"] = df["duration_s"] / 60
+
+    if x_col not in df.columns or y_col not in df.columns:
+        return _empty_fig(f"Colonnes manquantes : {x_col}, {y_col}")
+
+    df = df.dropna(subset=[x_col, y_col])
+    if df.empty:
+        return _empty_fig("Pas de données pour cette combinaison")
+
+    fig = px.scatter(
+        df,
+        x=x_col,
+        y=y_col,
+        color="sport_type",
+        hover_name="name" if "name" in df.columns else None,
+        custom_data=["activity_id"],
+        color_discrete_sequence=_COLORS,
+        labels={
+            x_col: _LABEL_MAP.get(x_col, x_col),
+            y_col: _LABEL_MAP.get(y_col, y_col),
+        },
+        title=f"{_LABEL_MAP.get(x_col, x_col)} × {_LABEL_MAP.get(y_col, y_col)}",
+    )
+    fig.update_traces(marker={"size": 9, "opacity": 0.8})
+    fig.update_layout(
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        margin={"l": 20, "r": 20, "t": 45, "b": 20},
+        xaxis={"showgrid": True, "gridcolor": "#eee"},
+        yaxis={"showgrid": True, "gridcolor": "#eee"},
+        legend_title="Sport",
+    )
     return fig

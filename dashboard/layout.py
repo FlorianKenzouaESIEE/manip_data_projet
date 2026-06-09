@@ -5,9 +5,11 @@ from __future__ import annotations
 from dash import dcc, html
 
 from .components.charts import (
+    SCATTER_OPTIONS,
     make_activity_type_bar,
     make_distance_histogram,
     make_duration_histogram,
+    make_scatter_figure,
 )
 from .components.header import header_component
 from .components.map import make_map_figure
@@ -76,6 +78,78 @@ def create_layout() -> html.Div:
                                     "display": "flex",
                                     "gap": "1rem",
                                     "flexWrap": "wrap",
+                                },
+                            ),
+                        ],
+                        style=_SECTION_STYLE,
+                    ),
+                    html.Hr(style=_HR_STYLE),
+                    # ── Section 3 : Scatter croisé ────────────────────────────
+                    html.Section(
+                        [
+                            html.H2("Analyse croisée", style=_TITLE_STYLE),
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.Label(
+                                                "Axe X",
+                                                style={
+                                                    "fontWeight": "600",
+                                                    "fontSize": "0.85rem",
+                                                    "display": "block",
+                                                    "marginBottom": "0.25rem",
+                                                },
+                                            ),
+                                            dcc.Dropdown(
+                                                id="scatter-x",
+                                                options=SCATTER_OPTIONS,
+                                                value="temperature_c",
+                                                clearable=False,
+                                            ),
+                                        ],
+                                        style={"flex": "1", "minWidth": "200px"},
+                                    ),
+                                    html.Div(
+                                        [
+                                            html.Label(
+                                                "Axe Y",
+                                                style={
+                                                    "fontWeight": "600",
+                                                    "fontSize": "0.85rem",
+                                                    "display": "block",
+                                                    "marginBottom": "0.25rem",
+                                                },
+                                            ),
+                                            dcc.Dropdown(
+                                                id="scatter-y",
+                                                options=SCATTER_OPTIONS,
+                                                value="pace_min_per_km",
+                                                clearable=False,
+                                            ),
+                                        ],
+                                        style={"flex": "1", "minWidth": "200px"},
+                                    ),
+                                ],
+                                style={
+                                    "display": "flex",
+                                    "gap": "1.5rem",
+                                    "marginBottom": "1rem",
+                                    "flexWrap": "wrap",
+                                },
+                            ),
+                            dcc.Graph(
+                                id="scatter-cross",
+                                figure=make_scatter_figure(activities),
+                                style={"height": "450px"},
+                            ),
+                            html.P(
+                                "Cliquez sur un point pour afficher le détail seconde "
+                                "par seconde de l'activité.",
+                                style={
+                                    "fontSize": "0.85rem",
+                                    "color": "#888",
+                                    "margin": "0.5rem 0 0",
                                 },
                             ),
                         ],
