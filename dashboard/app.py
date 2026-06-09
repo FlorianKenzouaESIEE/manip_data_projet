@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dash
 
+from .callbacks import register_callbacks
 from .layout import create_layout
 
 
@@ -11,4 +12,5 @@ def create_app() -> dash.Dash:
     """Crée et configure l'application Dash."""
     app = dash.Dash(__name__, title="DashSport")
     app.layout = create_layout()
+    register_callbacks(app)
     return app
