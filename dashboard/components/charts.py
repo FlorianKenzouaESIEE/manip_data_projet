@@ -1,4 +1,4 @@
-"""Composants graphiques : histogrammes et analyses croisées."""
+"""Composants graphiques : histogrammes, analyses croisées, détail d'activité."""
 
 from __future__ import annotations
 
@@ -193,4 +193,114 @@ def make_scatter_figure(
         yaxis={"showgrid": True, "gridcolor": "#eee"},
         legend_title="Sport",
     )
+    return fig
+
+
+# ─── Étape 15 : détail seconde par seconde ────────────────────────────────────
+
+
+def make_detail_figure(track: pd.DataFrame, activity_name: str = "") -> go.Figure:
+    """Profils d'une activité : élévation, vitesse et FC dans le temps.
+
+    Args:
+        track: Points GPS complets d'une activité (depuis load_activity_track).
+        activity_name: Nom de l'activité pour le titre du graphique.
+    """
+    if track.empty:
+        return _empty_fig("Cliquez sur un point du graphique croisé pour voir le détail")
+
+    from plotly.subplots import make_subplots
+
+    has_elevation = "elevation" in track.columns and track["elevation"].notna().any()
+    has_hr = "heart_rate" in track.columns and track["heart_rate"].notna().any()
+    has_speed = "cumulative_distance_m" in track.columns
+
+    row_titles: list[str] = []
+    if has_elevation:
+        row_titles.append("Élévation (m)")
+    if has_speed:
+        row_titles.append("Vitesse (km/h)")
+    if has_hr:
+        row_titles.append("Fréquence cardiaque (bpm)")
+
+    n_rows = len(row_titles) or 1
+    fig = make_subplots(
+        rows=n_rows,
+        cols=1,
+        shared_xaxes=True,
+        subplot_titles=row_titles if row_titles else ["Aucune donnée"],
+        vertical_spacing=0.1,
+    )
+
+    x_axis: pd.Series = (
+        pd.to_datetime(track["timestamp"])
+        if "timestamp" in track.columns
+        else pd.Series(track.index)
+    )
+
+    row = 1
+
+    if has_elevation:
+        fig.add_trace(
+            go.Scatter(
+                x=x_axis,
+                y=track["elevation"],
+                mode="lines",
+                name="Élévation",
+                line={"color": "#8bc34a", "width": 1.5},
+                fill="tozeroy",
+                fillcolor="rgba(139,195,74,0.15)",
+            ),
+            row=row,
+            col=1,
+        )
+        row += 1
+
+    if has_speed:
+        dist = track["cumulative_distance_m"].values
+        if "timestamp" in track.columns:
+            times = pd.to_datetime(track["timestamp"])
+            dt = times.diff().dt.total_seconds().fillna(1).clip(lower=0.1)
+        else:
+            dt = pd.Series([1.0] * len(track))
+        speed_kmh = (pd.Series(dist).diff().fillna(0) / dt * 3.6).clip(lower=0, upper=60)
+        fig.add_trace(
+            go.Scatter(
+                x=x_axis,
+                y=speed_kmh,
+                mode="lines",
+                name="Vitesse",
+                line={"color": "#1565c0", "width": 1.5},
+            ),
+            row=row,
+            col=1,
+        )
+        row += 1
+
+    if has_hr:
+        fig.add_trace(
+            go.Scatter(
+                x=x_axis,
+                y=track["heart_rate"],
+                mode="lines",
+                name="FC",
+                line={"color": "#e94560", "width": 1.5},
+            ),
+            row=row,
+            col=1,
+        )
+
+    title = f"Détail : {activity_name}" if activity_name else "Détail de l'activité"
+    fig.update_layout(
+        title=title,
+        showlegend=False,
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        margin={"l": 20, "r": 20, "t": 50, "b": 20},
+        height=max(300, n_rows * 200),
+    )
+    for i in range(1, n_rows + 1):
+        fig.update_xaxes(showgrid=True, gridcolor="#eee", row=i, col=1)
+        fig.update_yaxes(showgrid=True, gridcolor="#eee", row=i, col=1)
+
     return fig

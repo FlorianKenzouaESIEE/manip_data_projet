@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import pandas as pd
 from dash import dcc, html
 
 from .components.charts import (
     SCATTER_OPTIONS,
     make_activity_type_bar,
+    make_detail_figure,
     make_distance_histogram,
     make_duration_histogram,
     make_scatter_figure,
@@ -154,6 +156,20 @@ def create_layout() -> html.Div:
                             ),
                         ],
                         style=_SECTION_STYLE,
+                    ),
+                    html.Hr(style=_HR_STYLE),
+                    # ── Section 4 : Détail activité (masquée par défaut) ──────
+                    html.Section(
+                        id="detail-section",
+                        children=[
+                            html.H2("Détail de l'activité", style=_TITLE_STYLE),
+                            dcc.Graph(
+                                id="detail-graph",
+                                figure=make_detail_figure(pd.DataFrame()),
+                                config={"displayModeBar": False},
+                            ),
+                        ],
+                        style={"display": "none"},
                     ),
                 ],
                 style={"background": "#f5f5f5", "minHeight": "calc(100vh - 80px)"},
