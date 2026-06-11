@@ -5,9 +5,17 @@ from __future__ import annotations
 import pandas as pd
 from dash import dcc, html
 
-from .components.charts import make_global_hr_histogram, make_sport_duration_pie, make_sport_stats_table
+from .components.charts import (
+    make_comparison_chart,
+    make_global_hr_histogram,
+    make_personal_records_table,
+    make_sport_duration_pie,
+    make_sport_stats_table,
+    make_trimp_chart,
+    make_weekly_distance_chart,
+)
 from .components.header import header_component
-from .data import load_activities, load_hr_series_all
+from .data import load_activities, load_hr_series_all, load_weekly_kpis
 
 # ── Design tokens ─────────────────────────────────────────────────────────────
 _BG_MAIN = "#0D0D14"
@@ -34,12 +42,6 @@ _SECTION_TITLE: dict = {
     "textTransform": "uppercase",
     "opacity": "0.55",
     "marginBottom": "0.75rem",
-}
-_DROPDOWN_STYLE: dict = {
-    "background": _BG_CARD,
-    "borderRadius": "8px",
-    "border": f"1px solid {_PURPLE}",
-    "color": _TEXT,
 }
 
 # ── Couleurs et icônes par sport ──────────────────────────────────────────────
@@ -75,7 +77,7 @@ def _fmt_duration_short(dur_s: float) -> str:
     return f"{h}h{m:02d}" if h > 0 else f"{m}min"
 
 
-def _activity_card(row: pd.Series) -> html.Div:
+def build_activity_card(row: pd.Series) -> html.Div:
     """Construit une card cliquable pour une activité."""
     sport = str(row.get("sport_type", "unknown")).lower()
     border_color = _SPORT_COLORS.get(sport, _PURPLE)
@@ -172,7 +174,8 @@ def create_layout() -> html.Div:
     """Construit et retourne le layout complet de l'application."""
     activities = load_activities()
     hr_series = load_hr_series_all()
-    # Cartes d'activités
+    weekly_kpis = load_weekly_kpis()
+
     if activities.empty:
         cards: list = [
             html.P(
@@ -180,15 +183,25 @@ def create_layout() -> html.Div:
                 style={"color": "rgba(238,238,245,0.4)", "fontFamily": "'Barlow', sans-serif", "padding": "2rem 0", "textAlign": "center"},
             )
         ]
+        compare_options: list = []
     else:
-        sorted_acts = (
-            activities.sort_values("start_time", ascending=False)
-            if "start_time" in activities.columns
-            else activities
-        )
-        cards = [_activity_card(row) for _, row in sorted_acts.iterrows()]
+        sorted_acts = activities.sort_values("start_time", ascending=False)
+        cards = [build_activity_card(row) for _, row in sorted_acts.iterrows()]
+        compare_options = [
+            {
+                "label": f"{row['name']} — {pd.to_datetime(row['start_time']).strftime('%d/%m/%Y')}",
+                "value": int(row["activity_id"]),
+            }
+            for _, row in sorted_acts.iterrows()
+        ]
 
-    # ── Layout ────────────────────────────────────────────────────────────────
+    _dropdown_style = {
+        "flex": "1",
+        "minWidth": "200px",
+        "color": "#0D0D14",
+        "fontFamily": "'Barlow Condensed', sans-serif",
+    }
+
     return html.Div(
         [
             dcc.Store(id="app-state", data={"view": "dashboard", "activity_id": None}),
@@ -203,13 +216,43 @@ def create_layout() -> html.Div:
 
                     html.Div(
                         [
-                            # Stats par sport — tableau + donut sur la même ligne
+                            # ── Filtre par période ────────────────────────────
+                            html.Div(
+                                [
+                                    html.Div("Filtrer par période", style=_SECTION_TITLE),
+                                    html.Div(
+                                        [
+                                            dcc.DatePickerRange(
+                                                id="date-filter",
+                                                display_format="DD/MM/YYYY",
+                                                clearable=True,
+                                                start_date_placeholder_text="Début",
+                                                end_date_placeholder_text="Fin",
+                                            ),
+                                            html.Div(
+                                                id="filter-summary",
+                                                style={
+                                                    "color": _CYAN,
+                                                    "fontFamily": "'Barlow Condensed', sans-serif",
+                                                    "fontSize": "0.85rem",
+                                                    "alignSelf": "center",
+                                                },
+                                            ),
+                                        ],
+                                        style={"display": "flex", "alignItems": "center", "gap": "1.5rem", "flexWrap": "wrap"},
+                                    ),
+                                ],
+                                style=_CARD_STYLE,
+                            ),
+
+                            # ── Stats par sport + donut ───────────────────────
                             html.Div(
                                 [
                                     html.Div(
                                         [
                                             html.Div("Stats par sport", style=_SECTION_TITLE),
                                             dcc.Graph(
+                                                id="sport-stats-table",
                                                 figure=make_sport_stats_table(activities),
                                                 config={"displayModeBar": False},
                                             ),
@@ -220,6 +263,7 @@ def create_layout() -> html.Div:
                                         [
                                             html.Div("Durée par sport", style=_SECTION_TITLE),
                                             dcc.Graph(
+                                                id="sport-duration-pie",
                                                 figure=make_sport_duration_pie(activities),
                                                 config={"displayModeBar": False},
                                             ),
@@ -230,11 +274,23 @@ def create_layout() -> html.Div:
                                 style={"display": "flex", "gap": "1rem", "flexWrap": "wrap", "marginBottom": "1rem"},
                             ),
 
-                            # Histogramme FC global
+                            # ── KPI hebdomadaires ─────────────────────────────
+                            html.Div(
+                                [
+                                    html.Div("Distance hebdomadaire par sport", style=_SECTION_TITLE),
+                                    dcc.Graph(
+                                        id="weekly-distance-chart",
+                                        figure=make_weekly_distance_chart(weekly_kpis),
+                                        config={"displayModeBar": False},
+                                    ),
+                                ],
+                                style=_CARD_STYLE,
+                            ),
+
+                            # ── Histogramme FC global ─────────────────────────
                             html.Div(
                                 [
                                     html.Div("Distribution FC globale", style=_SECTION_TITLE),
-                                    # Légende des zones inline
                                     html.Div(
                                         [
                                             html.Span("■ Z1 Récup", style={"color": "#00B4D8", "marginRight": "1rem", "fontSize": "0.7rem"}),
@@ -254,7 +310,74 @@ def create_layout() -> html.Div:
                                 style=_CARD_STYLE,
                             ),
 
-                            # Liste des activités
+                            # ── Charge d'entraînement (TRIMP) ─────────────────
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.Div("Charge d'entraînement hebdomadaire", style={**_SECTION_TITLE, "marginBottom": "0"}),
+                                            html.Span(
+                                                "TRIMP = durée × facteur zone FC  (vert < 40 % · orange < 70 % · rouge = charge élevée)",
+                                                style={"fontSize": "0.7rem", "opacity": "0.45", "fontFamily": "'Barlow', sans-serif"},
+                                            ),
+                                        ],
+                                        style={"marginBottom": "0.75rem"},
+                                    ),
+                                    dcc.Graph(
+                                        id="trimp-chart",
+                                        figure=make_trimp_chart(activities),
+                                        config={"displayModeBar": False},
+                                    ),
+                                ],
+                                style=_CARD_STYLE,
+                            ),
+
+                            # ── Records personnels ────────────────────────────
+                            html.Div(
+                                [
+                                    html.Div("Records personnels — course à pied", style=_SECTION_TITLE),
+                                    dcc.Graph(
+                                        id="personal-records",
+                                        figure=make_personal_records_table(activities),
+                                        config={"displayModeBar": False},
+                                    ),
+                                ],
+                                style=_CARD_STYLE,
+                            ),
+
+                            # ── Comparaison de deux activités ─────────────────
+                            html.Div(
+                                [
+                                    html.Div("Comparer deux activités", style=_SECTION_TITLE),
+                                    html.Div(
+                                        [
+                                            dcc.Dropdown(
+                                                id="compare-activity-1",
+                                                options=compare_options,
+                                                placeholder="Activité 1...",
+                                                style=_dropdown_style,
+                                                clearable=True,
+                                            ),
+                                            dcc.Dropdown(
+                                                id="compare-activity-2",
+                                                options=compare_options,
+                                                placeholder="Activité 2...",
+                                                style=_dropdown_style,
+                                                clearable=True,
+                                            ),
+                                        ],
+                                        style={"display": "flex", "gap": "1rem", "marginBottom": "1rem", "flexWrap": "wrap"},
+                                    ),
+                                    dcc.Graph(
+                                        id="compare-chart",
+                                        figure=make_comparison_chart(pd.DataFrame(), pd.DataFrame()),
+                                        config={"displayModeBar": False},
+                                    ),
+                                ],
+                                style=_CARD_STYLE,
+                            ),
+
+                            # ── Activités récentes ────────────────────────────
                             html.Div(
                                 [
                                     html.Div("Activités récentes", style=_SECTION_TITLE),
@@ -301,7 +424,6 @@ def create_layout() -> html.Div:
                 id="view-detail",
                 style={"display": "none"},
                 children=[
-                    # Barre de navigation top
                     html.Div(
                         [
                             html.Button("← Retour", id="btn-retour", n_clicks=0),
@@ -318,13 +440,9 @@ def create_layout() -> html.Div:
 
                     html.Div(
                         [
-                            # Header activité (peuplé par callback)
                             html.Div(id="detail-header"),
-
-                            # Hero métriques (peuplé par callback)
                             html.Div(id="detail-hero-metrics"),
 
-                            # Carte GPS
                             html.Div(
                                 [
                                     html.Div("Tracé GPS", style=_SECTION_TITLE),
@@ -334,13 +452,9 @@ def create_layout() -> html.Div:
                                         style={"borderRadius": "8px", "overflow": "hidden"},
                                     ),
                                 ],
-                                style={
-                                    **_CARD_STYLE,
-                                    "border": f"1px solid {_PURPLE}",
-                                },
+                                style={**_CARD_STYLE, "border": f"1px solid {_PURPLE}"},
                             ),
 
-                            # Courbes de performance
                             html.Div(
                                 [
                                     html.Div(
@@ -371,9 +485,7 @@ def create_layout() -> html.Div:
                                 style=_CARD_STYLE,
                             ),
 
-                            # Conditions météo (peuplé par callback)
                             html.Div(id="detail-weather"),
-
                         ],
                         style={"maxWidth": "860px", "margin": "0 auto", "padding": "1rem 1rem 2rem"},
                     ),
