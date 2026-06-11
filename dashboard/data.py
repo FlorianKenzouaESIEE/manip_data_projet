@@ -64,3 +64,19 @@ def load_activity_track(activity_id: int) -> pd.DataFrame:
             params={"aid": activity_id},
         )
     return df
+
+
+def load_weekly_kpis() -> pd.DataFrame:
+    """Charge les KPI hebdomadaires depuis dashsport_clean.db."""
+    if not _CLEAN_DB.exists():
+        return pd.DataFrame()
+    engine = create_engine(f"sqlite:///{_CLEAN_DB}", echo=False)
+    return pd.read_sql_table("weekly_kpis", engine)
+
+
+def load_monthly_kpis() -> pd.DataFrame:
+    """Charge les KPI mensuels depuis dashsport_clean.db."""
+    if not _CLEAN_DB.exists():
+        return pd.DataFrame()
+    engine = create_engine(f"sqlite:///{_CLEAN_DB}", echo=False)
+    return pd.read_sql_table("monthly_kpis", engine)

@@ -387,3 +387,252 @@ def make_scatter_figure(
         hoverlabel=_HOVER_LABEL,
     )
     return fig
+
+
+# ── KPI hebdomadaires ─────────────────────────────────────────────────────────
+
+_BAR_COLORS = ["#F72585", "#00B4D8", "#39D353", "#E040FB", "#EF9F27", "#7B2FBE"]
+
+
+def make_weekly_distance_chart(weekly: pd.DataFrame) -> go.Figure:
+    """Histogramme empilé de la distance hebdomadaire par sport."""
+    if weekly.empty:
+        return _empty_fig("Aucun KPI hebdomadaire — lancez clean_data.py")
+
+    df = weekly.copy()
+    df["label"] = df["year"].astype(str) + "-S" + df["week"].astype(str).str.zfill(2)
+    df["distance_km"] = df["total_distance_m"] / 1000
+
+    fig = go.Figure()
+    for i, sport in enumerate(sorted(df["sport_type"].unique())):
+        sub = df[df["sport_type"] == sport].sort_values(["year", "week"])
+        fig.add_trace(go.Bar(
+            x=sub["label"],
+            y=sub["distance_km"],
+            name=sport.capitalize(),
+            marker_color=_BAR_COLORS[i % len(_BAR_COLORS)],
+            hovertemplate="%{x}<br>%{y:.1f} km<extra>" + sport.capitalize() + "</extra>",
+        ))
+
+    fig.update_layout(
+        barmode="stack",
+        paper_bgcolor=_BG_MAIN,
+        plot_bgcolor=_BG_CARD,
+        font=_FONT,
+        xaxis=dict(title="Semaine", gridcolor=_GRID, tickfont=dict(size=10), tickangle=-45),
+        yaxis=dict(title="Distance (km)", gridcolor=_GRID, tickfont=dict(size=11)),
+        legend=dict(bgcolor="rgba(20,20,32,0.85)", bordercolor="#7B2FBE", font=dict(color="#EEEEF5")),
+        margin=dict(l=48, r=20, t=16, b=80),
+        height=300,
+        hoverlabel=_HOVER_LABEL,
+    )
+    return fig
+
+
+# ── TRIMP — charge d'entraînement ─────────────────────────────────────────────
+
+_ZONE_WEIGHTS: dict[int, float] = {1: 1.0, 2: 1.5, 3: 2.0, 4: 3.0, 5: 4.5}
+
+
+def make_trimp_chart(activities: pd.DataFrame) -> go.Figure:
+    """Charge d'entraînement hebdomadaire — TRIMP simplifié (durée × facteur zone FC)."""
+    if activities.empty:
+        return _empty_fig("Aucune activité disponible")
+
+    df = activities.copy()
+    df["start_time"] = pd.to_datetime(df["start_time"])
+    df = df.dropna(subset=["start_time", "duration_s"])
+    df["duration_min"] = df["duration_s"] / 60
+    df["trimp"] = df.apply(
+        lambda r: r["duration_min"] * _ZONE_WEIGHTS.get(
+            int(r["hr_zone"]) if pd.notna(r.get("hr_zone")) else 0, 1.0
+        ),
+        axis=1,
+    )
+
+    iso = df["start_time"].dt.isocalendar()
+    df["label"] = iso.year.astype(int).astype(str) + "-S" + iso.week.astype(int).astype(str).str.zfill(2)
+    weekly = df.groupby("label")["trimp"].sum().reset_index().sort_values("label")
+
+    max_t = weekly["trimp"].max() or 1
+    colors = [
+        "#39D353" if v < max_t * 0.4 else "#EF9F27" if v < max_t * 0.7 else "#F72585"
+        for v in weekly["trimp"]
+    ]
+
+    fig = go.Figure(go.Bar(
+        x=weekly["label"],
+        y=weekly["trimp"],
+        marker_color=colors,
+        marker_line_width=0,
+        hovertemplate="%{x}<br>TRIMP : %{y:.0f}<extra></extra>",
+    ))
+    fig.update_layout(
+        paper_bgcolor=_BG_MAIN,
+        plot_bgcolor=_BG_CARD,
+        font=_FONT,
+        xaxis=dict(title="Semaine", gridcolor=_GRID, tickfont=dict(size=10), tickangle=-45),
+        yaxis=dict(title="Score TRIMP", gridcolor=_GRID, tickfont=dict(size=11)),
+        margin=dict(l=48, r=20, t=16, b=80),
+        height=260,
+        hoverlabel=_HOVER_LABEL,
+    )
+    return fig
+
+
+# ── Records personnels ─────────────────────────────────────────────────────────
+
+def _best_for_distance(
+    df: pd.DataFrame, min_m: float, max_m: float
+) -> pd.Series | None:
+    mask = (
+        (df["total_distance_m"] >= min_m)
+        & (df["total_distance_m"] <= max_m)
+        & (df["sport_type"].str.lower().isin(["running", "trail running"]))
+        & df["pace_min_per_km"].notna()
+    )
+    candidates = df[mask]
+    if candidates.empty:
+        return None
+    return candidates.loc[candidates["pace_min_per_km"].idxmin()]
+
+
+def _fmt_pace_rec(pace: float) -> str:
+    mins = int(pace)
+    secs = int((pace % 1) * 60)
+    return f"{mins}'{secs:02d}\"/km"
+
+
+def make_personal_records_table(activities: pd.DataFrame) -> go.Figure:
+    """Tableau des records personnels sur les distances clés (course à pied)."""
+    if activities.empty:
+        return _empty_fig("Aucune activité disponible")
+
+    records = [
+        ("5 km",        4500,  5500),
+        ("10 km",       9000, 11000),
+        ("Semi-marathon", 19000, 22500),
+        ("Marathon",    40000, 44000),
+    ]
+
+    labels, paces, dist_reelles, dates = [], [], [], []
+    for label, mn, mx in records:
+        best = _best_for_distance(activities, mn, mx)
+        labels.append(label)
+        if best is not None:
+            paces.append(_fmt_pace_rec(float(best["pace_min_per_km"])))
+            dist_reelles.append(f"{best['total_distance_m'] / 1000:.1f} km")
+            try:
+                dates.append(pd.to_datetime(best["start_time"]).strftime("%d/%m/%Y"))
+            except Exception:
+                dates.append("—")
+        else:
+            paces.append("—")
+            dist_reelles.append("—")
+            dates.append("—")
+
+    if all(p == "—" for p in paces):
+        return _empty_fig("Aucune activité de course à pied éligible")
+
+    row_colors = [
+        ["rgba(247,37,133,0.08)" if i % 2 == 0 else _BG_CARD for i in range(len(labels))]
+        for _ in range(4)
+    ]
+    fig = go.Figure(go.Table(
+        columnwidth=[1.8, 1.5, 1.5, 1.8],
+        header=dict(
+            values=["Distance", "Meilleure allure", "Dist. réelle", "Date"],
+            fill_color="#1A1A2E",
+            font=dict(color="#EEEEF5", family="Barlow Condensed", size=11),
+            align=["left", "center", "center", "center"],
+            line_color="rgba(123,47,190,0.5)",
+            height=30,
+        ),
+        cells=dict(
+            values=[labels, paces, dist_reelles, dates],
+            fill_color=row_colors,
+            font=dict(color="#EEEEF5", family="Barlow Condensed", size=12),
+            align=["left", "center", "center", "center"],
+            line_color="rgba(123,47,190,0.2)",
+            height=28,
+        ),
+    ))
+    fig.update_layout(
+        paper_bgcolor=_BG_CARD,
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=190,
+    )
+    return fig
+
+
+# ── Comparaison de deux activités ─────────────────────────────────────────────
+
+def make_comparison_chart(
+    track1: pd.DataFrame,
+    track2: pd.DataFrame,
+    label1: str = "Activité 1",
+    label2: str = "Activité 2",
+) -> go.Figure:
+    """Courbes de vitesse et FC superposées pour comparer deux activités."""
+    if track1.empty and track2.empty:
+        return _empty_fig("Sélectionnez deux activités ci-dessus pour les comparer")
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=False,
+        subplot_titles=["Vitesse (km/h)", "Fréquence cardiaque (bpm)"],
+        vertical_spacing=0.14,
+    )
+
+    palette = ["#F72585", "#00B4D8"]
+
+    for idx, (track, label, color) in enumerate(
+        [(track1, label1, palette[0]), (track2, label2, palette[1])]
+    ):
+        if track.empty:
+            continue
+
+        has_dist = "cumulative_distance_m" in track.columns
+        if has_dist:
+            x_vals = track["cumulative_distance_m"] / 1000
+        elif "timestamp" in track.columns:
+            ts = pd.to_datetime(track["timestamp"])
+            x_vals = (ts - ts.iloc[0]).dt.total_seconds() / 60
+        else:
+            x_vals = pd.Series(range(len(track)), dtype=float)
+
+        speed_kmh = pd.Series([0.0] * len(track))
+        if has_dist and "timestamp" in track.columns:
+            ts2 = pd.to_datetime(track["timestamp"])
+            dt = ts2.diff().dt.total_seconds().fillna(1).clip(lower=0.1)
+            speed_kmh = (track["cumulative_distance_m"].diff().fillna(0) / dt * 3.6).clip(lower=0, upper=80)
+
+        fig.add_trace(go.Scatter(
+            x=x_vals, y=speed_kmh, mode="lines", name=label,
+            line=dict(color=color, width=2),
+            hovertemplate=f"{label}: %{{y:.1f}} km/h<extra></extra>",
+            legendgroup=label,
+        ), row=1, col=1)
+
+        if "heart_rate" in track.columns and track["heart_rate"].notna().any():
+            fig.add_trace(go.Scatter(
+                x=x_vals, y=track["heart_rate"], mode="lines", name=label,
+                line=dict(color=color, width=2),
+                hovertemplate=f"{label}: %{{y:.0f}} bpm<extra></extra>",
+                showlegend=False,
+                legendgroup=label,
+            ), row=2, col=1)
+
+    fig.update_layout(
+        paper_bgcolor=_BG_MAIN,
+        plot_bgcolor=_BG_CARD,
+        font=_FONT,
+        legend=dict(bgcolor="rgba(20,20,32,0.85)", bordercolor="#7B2FBE", font=dict(color="#EEEEF5")),
+        margin=dict(l=48, r=20, t=40, b=48),
+        height=480,
+        hovermode="x unified",
+        hoverlabel=_HOVER_LABEL,
+    )
+    fig.update_xaxes(gridcolor=_GRID, tickfont=dict(size=11))
+    fig.update_yaxes(gridcolor=_GRID, tickfont=dict(size=11))
+    return fig

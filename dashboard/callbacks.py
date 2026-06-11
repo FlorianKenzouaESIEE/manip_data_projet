@@ -8,9 +8,15 @@ import pandas as pd
 import dash
 from dash import ALL, Input, Output, State, callback_context, html, dcc
 
-from .components.charts import make_performance_curves
+from .components.charts import (
+    make_comparison_chart,
+    make_performance_curves,
+    make_sport_duration_pie,
+    make_sport_stats_table,
+)
 from .components.map import make_activity_map
 from .data import load_activities, load_activity_track
+from .layout import build_activity_card
 
 # ── Design tokens (dupliqués ici pour rester autonome) ───────────────────────
 _BG_MAIN = "#0D0D14"
@@ -383,3 +389,70 @@ def register_callbacks(app: dash.Dash) -> None:
             make_performance_curves(track, x_mode=x_mode or "time"),
             _build_weather_section(row, track),
         )
+
+    # ── Callback 3 : filtre par période ───────────────────────────────────────
+
+    @app.callback(
+        [
+            Output("sport-stats-table", "figure"),
+            Output("sport-duration-pie", "figure"),
+            Output("filter-summary", "children"),
+        ],
+        [
+            Input("date-filter", "start_date"),
+            Input("date-filter", "end_date"),
+        ],
+    )
+    def filter_by_date(
+        start_date: str | None,
+        end_date: str | None,
+    ) -> tuple:
+        acts = load_activities()
+
+        if not acts.empty and (start_date or end_date):
+            acts = acts.copy()
+            acts["start_time"] = pd.to_datetime(acts["start_time"])
+            if start_date:
+                acts = acts[acts["start_time"] >= pd.to_datetime(start_date)]
+            if end_date:
+                acts = acts[acts["start_time"] <= pd.to_datetime(end_date) + pd.Timedelta(days=1)]
+
+        if start_date or end_date:
+            summary: str | None = f"{len(acts)} activité(s) sur la période sélectionnée"
+        else:
+            summary = None
+
+        return (
+            make_sport_stats_table(acts),
+            make_sport_duration_pie(acts),
+            summary,
+        )
+
+    # ── Callback 4 : comparaison de deux activités ────────────────────────────
+
+    @app.callback(
+        Output("compare-chart", "figure"),
+        [
+            Input("compare-activity-1", "value"),
+            Input("compare-activity-2", "value"),
+        ],
+    )
+    def update_comparison(
+        act1_id: int | None,
+        act2_id: int | None,
+    ) -> object:
+        if act1_id is None and act2_id is None:
+            return make_comparison_chart(pd.DataFrame(), pd.DataFrame())
+
+        activities = load_activities()
+
+        track1 = load_activity_track(int(act1_id)) if act1_id is not None else pd.DataFrame()
+        track2 = load_activity_track(int(act2_id)) if act2_id is not None else pd.DataFrame()
+
+        def _label(aid: int | None) -> str:
+            if aid is None or activities.empty:
+                return "—"
+            m = activities[activities["activity_id"] == aid]
+            return str(m.iloc[0]["name"]) if not m.empty else f"Activité {aid}"
+
+        return make_comparison_chart(track1, track2, _label(act1_id), _label(act2_id))
