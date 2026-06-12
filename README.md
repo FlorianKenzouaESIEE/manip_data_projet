@@ -275,3 +275,30 @@ mypy src/
 ```
 
 L'ensemble de `src/` est annoté avec des types Python 3.11 et vérifié par mypy en mode strict.
+
+---
+
+## Utilisation de l'IA (Claude — Anthropic)
+
+Tout au long du développement, un agent IA (Claude, développé par Anthropic) a été utilisé comme assistant technique. Les contributions concrètes ont été les suivantes :
+
+### Roadmap et structuration du projet
+
+L'IA a aidé à rédiger une roadmap étape par étape, en découpant le projet en jalons progressifs : ingestion, modèles de données, transformation, enrichissement météo, dashboard et tests. Ce découpage a permis de maintenir une progression cohérente et de ne pas mélanger les responsabilités entre les modules.
+
+### Architecture
+
+L'IA a proposé et justifié plusieurs choix d'architecture :
+
+- Séparation stricte entre la **base brute** (`dashsport_raw.db`) et la **base enrichie** (`dashsport_clean.db`), pour préserver les données source et rendre le pipeline rejouable
+- Utilisation de **dataclasses typées** (`ParsedGPXActivity`, `ParsedFITActivity`) comme couche intermédiaire entre les parsers et SQLAlchemy, afin d'isoler la logique de parsing de la logique de persistance
+- Organisation des fonctions de transformation en **fonctions pures** (sans accès base de données), rendant le code testable unitairement sans infrastructure
+- Pattern **bootstrap incrémental** dans `main.py` : seules les nouvelles activités sont traitées à chaque lancement
+
+### Écriture des tests
+
+L'IA a généré les cas de test pour les modules `src/transform/` et `src/ingestion/`, en couvrant les cas nominaux, les cas limites (distance nulle, aucun point GPS, données FC absentes) et les erreurs attendues (`FileNotFoundError`, `ValueError`).
+
+### Rédaction du README
+
+L'IA a rédigé et structuré ce README à partir de la lecture directe des fichiers source du projet, en documentant chaque module, les schémas de base de données, les formules de calcul et le fonctionnement des callbacks Dash.
