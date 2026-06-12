@@ -1,6 +1,8 @@
+> Vidéo de démonstration : https://youtu.be/_Ofig6UfDtg
+
 # DashSport — Analyse de données sportives Strava
 
-Dashboard interactif d'analyse de données sportives personnelles issues d'une archive Strava locale.
+Dashboard interactif d'analyse de données sportives personnelles issues d'une archive Strava locale.  
 Projet scolaire de Data Engineering — ESIEE Paris.
 
 ---
@@ -25,32 +27,34 @@ python main.py
 
 Ouvrir ensuite **http://127.0.0.1:8050** dans un navigateur.
 
-> `main.py` orchestre automatiquement l'ingestion, l'enrichissement météo et le nettoyage avant de lancer le dashboard. Aucune clé d'API requise.
+> `main.py` orchestre automatiquement l'ingestion, l'enrichissement météo et le nettoyage avant de lancer le dashboard. Aucune clé d'API n'est requise, toutes les données météo sont servies depuis un cache pré-téléchargé.
 
 ---
 
-## Architecture des données
+## Architecture générale
+
+Le projet suit un pipeline **ETL → SQLite → Dash** en trois étapes distinctes :
 
 ```
-activities/             ← fichiers bruts Strava (.gpx / .fit / .fit.gz)
+activities/             ← fichiers bruts Strava (.gpx)
       │
       ▼
-get_data.py             ← parsing + insertion
+get_data.py             ← parsing + insertion SQLAlchemy
       │
       ▼
-data/dashsport_raw.db   ← activités + points GPS (SQLite)
+data/dashsport_raw.db   ← tables : activities + track_points
       │
       ▼
-clean_data.py           ← métriques métier + enrichissement météo
+clean_data.py           ← métriques métier + enrichissement météo + agrégats
       │
       ▼
-data/dashsport_clean.db ← activités enrichies + KPI hebdo/mensuels (SQLite)
+data/dashsport_clean.db ← tables : activities_clean + weekly_kpis + monthly_kpis
       │
       ▼
-dashboard/              ← Dash / Plotly
+dashboard/              ← Dash / Plotly (lecture seule)
 ```
 
-Les données météo historiques sont récupérées depuis un **cache local JSON** (`data/weather_cache.json`) pré-téléchargé via l'API Open-Meteo — aucune connexion réseau n'est nécessaire pour les données.
+`main.py` exécute ces trois étapes en séquence au démarrage, de façon **incrémentale** : seules les nouvelles activités sont parsées et ajoutées, les activités déjà présentes en base sont ignorées.
 
 ---
 
@@ -68,7 +72,7 @@ manip_data_projet/
 ├── data/
 │   ├── dashsport_raw.db           # Base brute (non versionnée)
 │   ├── dashsport_clean.db         # Base enrichie (non versionnée)
-│   └── weather_cache.json         # Cache météo Open-Meteo
+│   └── weather_cache.json         # Cache météo Open-Meteo (versionné)
 │
 ├── src/
 │   ├── ingestion/
@@ -83,15 +87,15 @@ manip_data_projet/
 │   └── models_clean.py            # Modèles SQLAlchemy — base enrichie
 │
 ├── dashboard/
-│   ├── app.py                     # Instance Dash
-│   ├── layout.py                  # Layout principal
-│   ├── callbacks.py               # Callbacks interactifs
-│   ├── data.py                    # Chargement des données vers Pandas
+│   ├── app.py                     # Instance Dash + montage des callbacks
+│   ├── layout.py                  # Layout principal (vues dashboard + détail)
+│   ├── callbacks.py               # Callbacks Dash : navigation et graphiques
+│   ├── data.py                    # Couche d'accès aux données (SQLite → Pandas)
 │   ├── assets/style.css           # Styles globaux
 │   └── components/
 │       ├── header.py              # En-tête + KPI globaux
-│       ├── map.py                 # Carte des tracés GPS
-│       └── charts.py              # Courbes de performance, histogrammes, stats
+│       ├── map.py                 # Carte des tracés GPS (Plotly Scattermapbox)
+│       └── charts.py              # Histogramme FC, courbes de performance, stats
 │
 ├── scripts/
 │   └── fetch_weather_cache.py     # Téléchargement du cache météo (usage unique)
@@ -106,49 +110,195 @@ manip_data_projet/
 
 ---
 
-## Fonctionnalités du dashboard
+## Détail des modules
 
-- **En-tête** : nombre d'activités, distance totale, synthèse globale
-- **Carte GPS** : tracés de toutes les activités sur fond OpenStreetMap, colorés par sport
-- **Liste des activités** : cards cliquables avec allure, distance, durée, météo au départ
-- **Détail d'une activité** : courbes seconde par seconde (allure, vitesse, FC, altitude)
-- **Stats par sport** : histogrammes de distance, durée, répartition des types d'activité
-- **Graphiques croisés** : axes X/Y configurables (allure, vitesse, FC, température, distance…)
+### `main.py` — Point d'entrée
+
+Lance le bootstrap complet avant de démarrer le serveur Dash :
+
+1. Si le dossier `activities/` existe → appelle `get_data.main()` (ingestion incrémentale)
+2. Si `dashsport_raw.db` existe → appelle `fetch_weather_cache.main()` (mise à jour optionnelle du cache météo)
+3. Appelle `clean_data.main()` (métriques + enrichissement)
+4. Démarre Dash sur `127.0.0.1:8050`
+
+### `get_data.py` — Ingestion
+
+Parcourt récursivement le dossier `activities/` et dispatche chaque fichier vers le parser adéquat :
+
+- `.gpx` → `src/ingestion/parse_gpx.py`
+- `.fit` ou `.fit.gz` → `src/ingestion/parse_fit.py`
+
+Chaque activité parsée est insérée dans `dashsport_raw.db` via SQLAlchemy. Les fichiers déjà présents (clé `source_file` unique) sont ignorés.
+
+### `src/ingestion/parse_gpx.py` — Parser GPX
+
+Lit les fichiers `.gpx` Strava via `gpxpy`. Pour chaque point GPS :
+
+- Extrait latitude, longitude, altitude, timestamp
+- Extrait FC et cadence depuis les **extensions Garmin/Strava** (`gpxtpx:TrackPointExtension`)
+- Calcule la **distance cumulée** point à point via la formule haversine (rayon terrestre = 6 371 000 m)
+
+Retourne une `ParsedGPXActivity` (dataclass) contenant la liste typée des `TrackPoint`.
+
+### `src/ingestion/parse_fit.py` — Parser FIT/FIT.GZ
+
+Lit les fichiers `.fit` (format binaire Garmin) et `.fit.gz` (variante compressée) via `fitparse`. Particularités :
+
+- Les coordonnées GPS sont stockées en **semicircles** → conversion en degrés décimaux (`× 180 / 2³¹`)
+- Le type de sport est extrait des messages `sport` puis `session`
+- La distance cumulée est calculée par haversine, comme pour le GPX
+
+### `src/transform/metrics.py` — Métriques sportives
+
+Fonctions pures (sans effet de bord, testables unitairement) :
+
+| Fonction | Calcul | Unité |
+|---|---|---|
+| `compute_pace` | `(durée_s / 60) / (distance_m / 1000)` | min/km |
+| `compute_speed` | `(distance_m / 1000) / (durée_s / 3600)` | km/h |
+| `compute_avg_hr` | moyenne des FC non nulles | bpm |
+| `compute_max_hr` | max des FC non nulles | bpm |
+| `compute_hr_zone` | % FC max → zone 1-5 (seuils Coggan) | — |
+
+Zones de fréquence cardiaque (FC max de référence : 190 bpm par défaut) :
+
+| Zone | Seuil | Description |
+|---|---|---|
+| Z1 | < 60 % FC max | Récupération active |
+| Z2 | 60–70 % FC max | Endurance de base |
+| Z3 | 70–80 % FC max | Aérobie / tempo |
+| Z4 | 80–90 % FC max | Seuil anaérobie |
+| Z5 | > 90 % FC max | VO₂ max / effort maximal |
+
+### `src/transform/aggregations.py` — Agrégats KPI
+
+Calcule les KPI agrégés **par semaine ISO** (`compute_weekly_kpis`) et **par mois calendaire** (`compute_monthly_kpis`), segmentés par type de sport. Pour chaque bucket :
+
+- Nombre d'activités, distance totale, durée totale
+- Allure moyenne, vitesse moyenne
+- Température moyenne (depuis les données météo enrichies)
+
+### `src/weather/` — Cache météo
+
+Le fichier `data/weather_cache.json` contient les relevés historiques **Open-Meteo** (température, vent, précipitations, humidité, code WMO) pour chaque heure de chaque journée couverte par les activités. `scripts/fetch_weather_cache.py` télécharge ce cache une seule fois. La lecture en runtime est purement locale, **aucune connexion réseau n'est nécessaire**.
+
+### `src/models.py` — Schéma de la base brute
+
+Deux tables SQLAlchemy :
+
+- **`activities`** : métadonnées d'une activité (nom, type de sport, date de début, durée, distance, coordonnées GPS de départ)
+- **`track_points`** : points GPS horodatés (lat, lon, altitude, FC, cadence, distance cumulée) — relation 1-N avec `activities`
+
+### `src/models_clean.py` — Schéma de la base enrichie
+
+Trois tables SQLAlchemy :
+
+- **`activities_clean`** : copie enrichie de chaque activité avec allure, vitesse, FC moy/max, zone FC, et données météo (température, vent, précipitations, humidité, code WMO)
+- **`weekly_kpis`** : agrégats hebdomadaires par sport (contrainte d'unicité sur `year × week × sport_type`)
+- **`monthly_kpis`** : agrégats mensuels par sport (contrainte d'unicité sur `year × month × sport_type`)
 
 ---
 
-## Pipeline de données détaillé
+## Dashboard
 
-| Étape | Script | Sortie |
-|-------|--------|--------|
-| Parsing | `get_data.py` | `dashsport_raw.db` — tables `activities` + `track_points` |
-| Métriques | `clean_data.py` | allure (min/km), vitesse (km/h), zones FC (1-5) |
-| Météo | `clean_data.py` + cache JSON | température, vent, précipitations, humidité |
-| Agrégats | `clean_data.py` | KPI hebdomadaires et mensuels par sport |
+L'application Dash est organisée en **deux vues** gérées par un `dcc.Store` central (`app-state`).
+
+### Vue 1 — Dashboard principal
+
+- **En-tête** (`header.py`) : nombre total d'activités, distance totale, durée totale, sport(s) pratiqué(s)
+- **Stats par sport** : tableau récapitulatif (activités, distance, durée, allure moy.) + donut "Durée par sport"
+- **Distribution FC globale** : histogramme coloré par zones (Z1 cyan → Z5 rose), axe Y en minutes
+- **Liste des activités** : cards cliquables triées par date décroissante — chaque card affiche distance, durée, allure et FC moyenne
+
+### Vue 2 — Détail d'une activité (au clic sur une card)
+
+- **Hero métriques** : 4 tuiles (distance, durée, allure, dénivelé positif)
+- **Tracé GPS** : carte Plotly Scattermapbox sur fond OpenStreetMap avec le tracé de l'activité
+- **Courbes de performance** : graphique multi-pistes seconde par seconde (allure, vitesse, FC, altitude), axe X commutable entre **temps** et **distance** via RadioItems
+- **Conditions météo** : température, vent, humidité, altitude moyenne + analyse automatique (conditions difficiles / favorables / optimales)
+
+### `dashboard/data.py` — Couche données
+
+| Fonction | Source | Détail |
+|---|---|---|
+| `load_activities()` | `dashsport_clean.db` | Toutes les activités enrichies |
+| `load_track_points()` | `dashsport_raw.db` | Points GPS sous-échantillonnés (1 sur 5) pour la carte globale |
+| `load_activity_track(id)` | `dashsport_raw.db` | Tous les points d'une activité (sans sous-échantillonnage) pour le détail |
+| `load_hr_series_all()` | `dashsport_raw.db` | Toutes les valeurs FC pour l'histogramme global |
+
+### `dashboard/callbacks.py` — Callbacks Dash
+
+Deux callbacks principaux :
+
+1. **`update_app_state`** : écoute les clics sur les cards et le bouton "Retour", met à jour le store `app-state`
+2. **`render_view`** : réagit au store et au mode d'axe X des courbes, rend la vue active (dashboard ou détail) en construisant dynamiquement l'en-tête, les métriques héros, la carte, les courbes et la section météo
+
+---
+
+## Pipeline de données — récapitulatif
+
+| Étape | Script | Entrée | Sortie |
+|---|---|---|---|
+| Parsing GPX | `get_data.py` → `parse_gpx.py` | `.gpx` | `activities` + `track_points` |
+| Parsing FIT | `get_data.py` → `parse_fit.py` | `.fit` / `.fit.gz` | `activities` + `track_points` |
+| Métriques | `clean_data.py` | `dashsport_raw.db` | allure, vitesse, FC moy/max, zone FC |
+| Météo | `clean_data.py` + cache JSON | `weather_cache.json` | temp., vent, précip., humidité |
+| Agrégats | `clean_data.py` | activités enrichies | `weekly_kpis`, `monthly_kpis` |
 
 ---
 
 ## Technologies
 
-| Catégorie | Bibliothèques |
-|-----------|--------------|
-| Parsing | `gpxpy`, `fitparse` |
-| Base de données | `SQLAlchemy`, SQLite |
-| Transformation | `pandas`, `numpy` |
-| Dashboard | `Dash`, `Plotly` |
-| Météo | Open-Meteo (cache local JSON) |
-| Qualité | `mypy`, `pytest` |
+| Catégorie | Bibliothèques | Version minimale |
+|---|---|---|
+| Parsing | `gpxpy`, `fitparse` | 1.6.0, 1.2.0 |
+| Base de données | `SQLAlchemy`, SQLite | 2.0.0 |
+| Transformation | `pandas`, `numpy` | 2.1.0, 1.26.0 |
+| Dashboard | `Dash`, `Plotly` | 2.14.0, 5.18.0 |
+| Météo | Open-Meteo (cache local JSON) | — |
+| Qualité | `mypy`, `pytest` | 1.8.0, 8.0.0 |
 
 ---
 
-## Lancer les tests
+## Tests
 
 ```bash
 pytest tests/
 ```
 
-## Vérification du typage
+Les tests couvrent les parsers GPX et FIT, les fonctions de métriques (allure, vitesse, zones FC), les agrégations KPI hebdomadaires et mensuels, et la lecture du cache météo. Toutes les fonctions de `src/transform/` sont pures et testées sans base de données.
+
+## Vérification du typage statique
 
 ```bash
 mypy src/
 ```
+
+L'ensemble de `src/` est annoté avec des types Python 3.11 et vérifié par mypy en mode strict.
+
+---
+
+## Utilisation de l'IA (Claude — Anthropic)
+
+Tout au long du développement, un agent IA (Claude, développé par Anthropic) a été utilisé comme assistant technique. Les contributions concrètes ont été les suivantes :
+
+### Roadmap et structuration du projet
+
+L'IA a aidé à rédiger une roadmap étape par étape, en découpant le projet en jalons progressifs : ingestion, modèles de données, transformation, enrichissement météo, dashboard et tests. Ce découpage a permis de maintenir une progression cohérente et de ne pas mélanger les responsabilités entre les modules.
+
+### Architecture
+
+L'IA a proposé et justifié plusieurs choix d'architecture :
+
+- Séparation stricte entre la **base brute** (`dashsport_raw.db`) et la **base enrichie** (`dashsport_clean.db`), pour préserver les données source et rendre le pipeline rejouable
+- Utilisation de **dataclasses typées** (`ParsedGPXActivity`, `ParsedFITActivity`) comme couche intermédiaire entre les parsers et SQLAlchemy, afin d'isoler la logique de parsing de la logique de persistance
+- Organisation des fonctions de transformation en **fonctions pures** (sans accès base de données), rendant le code testable unitairement sans infrastructure
+- Pattern **bootstrap incrémental** dans `main.py` : seules les nouvelles activités sont traitées à chaque lancement
+
+### Écriture des tests
+
+L'IA a généré les cas de test pour les modules `src/transform/` et `src/ingestion/`, en couvrant les cas nominaux, les cas limites (distance nulle, aucun point GPS, données FC absentes) et les erreurs attendues (`FileNotFoundError`, `ValueError`).
+
+### Rédaction du README
+
+L'IA a rédigé et structuré ce README à partir de la lecture directe des fichiers source du projet, en documentant chaque module, les schémas de base de données, les formules de calcul et le fonctionnement des callbacks Dash.
